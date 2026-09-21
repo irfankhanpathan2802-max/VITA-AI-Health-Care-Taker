@@ -1,12 +1,13 @@
-// Default to the live production Render backend if VITE_API_URL is undefined or misconfigured
-let rawUrl = import.meta.env.VITE_API_URL || 'https://vita-ai-health-care-taker.onrender.com/api';
-
-// Sanitize in case "VITE_API_URL=" was accidentally included in the value
-if (typeof rawUrl === 'string' && rawUrl.includes('VITE_API_URL=')) {
-  rawUrl = rawUrl.replace(/VITE_API_URL=/g, '');
+// In production (Vercel, mobile, etc.), ALWAYS connect directly to live Render backend.
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+let localUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+if (typeof localUrl === 'string' && localUrl.includes('VITE_API_URL=')) {
+  localUrl = localUrl.replace(/VITE_API_URL=/g, '');
 }
 
-export const BASE_URL = (rawUrl || 'https://vita-ai-health-care-taker.onrender.com/api').trim().replace(/\/+$/, '');
+export const BASE_URL = isLocal && localUrl.startsWith('http://localhost')
+  ? localUrl.trim().replace(/\/+$/, '')
+  : 'https://vita-ai-health-care-taker.onrender.com/api';
 
 export const apiRequest = async (endpoint, options = {}) => {
   const token = localStorage.getItem('vitacare_token');
