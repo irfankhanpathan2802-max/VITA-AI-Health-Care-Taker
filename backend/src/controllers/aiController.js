@@ -11,9 +11,10 @@ export const analyzePhoto = async (req, res) => {
     const { manualHint = '', filename = '' } = req.body;
 
     const result = await analyzeFoodImage({
-      filename: file ? file.filename : filename,
+      filename: file ? (file.filename || file.originalname || 'camera_photo.jpg') : filename,
       originalname: file ? file.originalname : filename,
       mimetype: file ? file.mimetype : 'image/jpeg',
+      buffer: file ? file.buffer : null,
       manualHint,
     });
 

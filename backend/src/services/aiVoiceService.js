@@ -14,7 +14,26 @@ export const parseVoiceMealTranscript = (transcript = '') => {
     };
   }
 
-  const text = transcript.toLowerCase();
+  let text = transcript.toLowerCase();
+  // Normalize phonetic & regional aliases (e.g. boonde -> boondi)
+  const ALIAS_MAP = {
+    'boonde': 'boondi',
+    'bundi': 'boondi',
+    'pohe': 'poha',
+    'uppittu': 'upma',
+    'dosha': 'dosa',
+    'dhal': 'dal',
+    'daal': 'dal',
+    'chawal': 'rice',
+    'anda': 'egg',
+    'panir': 'paneer',
+    'chapati': 'roti',
+    'chapathi': 'roti',
+    'omlet': 'omelette',
+  };
+  for (const [alias, standard] of Object.entries(ALIAS_MAP)) {
+    text = text.replace(new RegExp(`\\b${alias}\\b`, 'gi'), standard);
+  }
 
   // Detect meal type
   let understoodMealType = 'lunch'; // default fallback
@@ -31,6 +50,21 @@ export const parseVoiceMealTranscript = (transcript = '') => {
   for (const food of FOOD_DATABASE) {
     const rawTokens = food.name.toLowerCase().split(/[ ()/,]+/).filter(k => k.length > 2 && !STOP_WORDS.has(k));
     
+    // Disambiguation: For compound foods, ensure distinguishing keywords are present
+    const lowerName = food.name.toLowerCase();
+    if (lowerName.includes('raita') && !text.includes('raita')) continue;
+    if (lowerName.includes('sweet') && !text.includes('sweet')) continue;
+    if (lowerName.includes('laddu') && !text.includes('laddu')) continue;
+    if (lowerName.includes('paratha') && !text.includes('paratha')) continue;
+    if (lowerName.includes('biryani') && !text.includes('biryani')) continue;
+    if (lowerName.includes('curd rice') && !text.includes('curd rice') && !text.includes('dahi chawal') && !(text.includes('curd') && text.includes('rice'))) continue;
+    if (lowerName.includes('rice') && !lowerName.includes('curd') && !text.includes('rice') && !text.includes('chawal')) continue;
+    if (lowerName.includes('omelette') && !text.includes('omelette')) continue;
+    if (lowerName.includes('bread') && !text.includes('bread')) continue;
+    if (lowerName.includes('makhani') && !text.includes('makhani')) continue;
+    if (lowerName.includes('butter') && !text.includes('butter')) continue;
+    if (lowerName.includes('palak') && !text.includes('palak')) continue;
+
     // Check if any significant token or alias matches the transcript
     const matchesToken = rawTokens.some(token => {
       // Check singular, plural (token + 's', or token ending in 's' trimmed)

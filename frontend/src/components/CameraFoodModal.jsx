@@ -465,7 +465,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                 className="w-full px-3.5 py-2 text-xs rounded-xl border border-amber-200 bg-white focus:outline-none focus:border-amber-500 font-medium text-gray-800 shadow-xs"
               />
               <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {['Dosa', 'Boiled Eggs', 'Steamed Rice', 'Yellow Dal', 'Roti', 'Paneer'].map((chip) => (
+                {['Boondi', 'Dosa', 'Boiled Eggs', 'Steamed Rice', 'Yellow Dal', 'Roti', 'Paneer'].map((chip) => (
                   <button
                     key={chip}
                     type="button"
@@ -486,6 +486,20 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
             <div className="pt-3 border-t border-gray-100">
               <p className="text-xs font-bold text-gray-500 mb-2">Instant Test Presets:</p>
               <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleSampleSelect(
+                      'crispy_boondi_plate.jpg',
+                      '/images/makhana.jpg',
+                      'Boondi'
+                    )
+                  }
+                  className="p-2.5 rounded-xl border border-gray-200 hover:border-emerald-500 text-left bg-gray-50 hover:bg-emerald-50 text-gray-800 font-semibold flex items-center gap-1.5 transition-colors"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  Crispy Boondi (Valid Food)
+                </button>
                 <button
                   type="button"
                   onClick={() =>
