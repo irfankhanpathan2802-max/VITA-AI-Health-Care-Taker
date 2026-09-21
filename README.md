@@ -2,7 +2,9 @@
 
 > **Understand your lifestyle. Eat smarter. Build healthier habits.**
 
-VitaCare is a production-quality preventive health-tech startup application that integrates daily lifestyle tracking, intelligent AI meal analysis (photo, voice, and manual), circadian reminders, and a curated healthy-food marketplace.
+### 🌐 Live Prototype Links:
+- 📱 **Live Web Application (Frontend)**: [https://vita-ai-health-care-taker.vercel.app/](https://vita-ai-health-care-taker.vercel.app/)
+- ⚙️ **Live Backend API (Render)**: [https://vita-ai-health-care-taker.onrender.com/api/health](https://vita-ai-health-care-taker.onrender.com/api/health)
 
 ---
 
