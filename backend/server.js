@@ -14,6 +14,7 @@ import reportRoutes from './src/routes/reportRoutes.js';
 import aiRoutes from './src/routes/aiRoutes.js';
 import storeRoutes from './src/routes/storeRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
+import foodRoutes from './src/routes/foodRoutes.js';
 
 dotenv.config();
 
@@ -50,6 +51,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/store', storeRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/food', foodRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

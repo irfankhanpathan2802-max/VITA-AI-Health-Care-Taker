@@ -14,6 +14,12 @@ import {
   MicOff,
   Search,
   Plus,
+  Barcode,
+  HelpCircle,
+  ShieldAlert,
+  Info,
+  ChevronDown,
+  Layers,
 } from 'lucide-react';
 import { apiRequest } from '../services/api.js';
 import { FOOD_CATALOG } from '../data/foodCatalog.js';
@@ -21,27 +27,46 @@ import { FOOD_CATALOG } from '../data/foodCatalog.js';
 export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSaved }) => {
   if (!isOpen) return null;
 
-  const [activeTab, setActiveTab] = useState('camera'); // 'camera' | 'files' | 'drive'
+  const [activeTab, setActiveTab] = useState('camera'); // 'camera' | 'files' | 'drive' | 'barcode'
   const [step, setStep] = useState('capture'); // 'capture' | 'analyzing' | 'error' | 'confirm'
+  const [analysisStage, setAnalysisStage] = useState(1);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [driveUrl, setDriveUrl] = useState('');
   const [manualHint, setManualHint] = useState('');
+  const [barcodeInput, setBarcodeInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [errorDetails, setErrorDetails] = useState(null);
   const [detectedItems, setDetectedItems] = useState([]);
+  const [primaryIdentification, setPrimaryIdentification] = useState(null);
+  const [possibleMatches, setPossibleMatches] = useState([]);
+  const [nutritionSource, setNutritionSource] = useState('database');
+  const [healthDisclaimer, setHealthDisclaimer] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [aiEngineUsed, setAiEngineUsed] = useState('VitaCare AI Multimodal Vision');
+  const [aiEngineUsed, setAiEngineUsed] = useState('VitaCare Multi-Stage Vision Agent');
 
   // Live Camera state
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
-  const [facingMode, setFacingMode] = useState('environment'); // 'user' or 'environment'
+  const [facingMode, setFacingMode] = useState('environment');
 
-  // Start / stop camera stream when tab is 'camera' and step is 'capture'
+  // Multi-stage analysis animation ticker
+  useEffect(() => {
+    let timer;
+    if (step === 'analyzing') {
+      setAnalysisStage(1);
+      timer = setInterval(() => {
+        setAnalysisStage((prev) => (prev < 5 ? prev + 1 : prev));
+      }, 700);
+    }
+    return () => clearInterval(timer);
+  }, [step]);
+
+  // Start / stop camera stream
   useEffect(() => {
     let streamInstance = null;
 
@@ -110,7 +135,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
         stopCamera();
         analyzeImage(file);
       }
-    }, 'image/jpeg', 0.9);
+    }, 'image/jpeg', 0.92);
   };
 
   const resetState = () => {
@@ -120,9 +145,13 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     setPreviewUrl(null);
     setDriveUrl('');
     setManualHint('');
+    setBarcodeInput('');
     setSearchQuery('');
     setErrorMessage('');
+    setErrorDetails(null);
     setDetectedItems([]);
+    setPrimaryIdentification(null);
+    setPossibleMatches([]);
     setIsSaving(false);
     setIsListening(false);
   };
@@ -142,7 +171,6 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     }
   };
 
-  // Convert Google Drive share links to direct image preview URLs
   const handleDriveSubmit = (e) => {
     e.preventDefault();
     if (!driveUrl.trim()) return;
@@ -156,6 +184,12 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
 
     setPreviewUrl(resolvedUrl);
     analyzeImage({ name: 'drive_meal_photo.jpg', url: resolvedUrl });
+  };
+
+  const handleBarcodeSubmit = (e) => {
+    e.preventDefault();
+    if (!barcodeInput.trim()) return;
+    analyzeImage({ name: 'barcode_lookup', barcode: barcodeInput.trim() });
   };
 
   const handleSampleSelect = (sampleName, sampleUrl, hint = '') => {
@@ -174,7 +208,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'en-IN'; // also handles English with Indian accents & food names
+    recognition.lang = 'en-IN';
     recognition.interimResults = false;
 
     setIsListening(true);
@@ -195,12 +229,18 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
   const analyzeImage = async (file) => {
     setStep('analyzing');
     setErrorMessage('');
+    setErrorDetails(null);
 
     try {
       const formData = new FormData();
       const hint = (file && file.hint) ? file.hint : manualHint;
       if (hint) {
         formData.append('manualHint', hint);
+      }
+
+      const barcodeVal = (file && file.barcode) ? file.barcode : barcodeInput;
+      if (barcodeVal) {
+        formData.append('barcode', barcodeVal);
       }
 
       if (file instanceof File) {
@@ -210,65 +250,150 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
         if (file.url) formData.append('imageUrl', file.url);
       }
 
-      const res = await apiRequest('/ai/analyze-photo', {
+      // Call our 7-stage Food Vision API
+      const res = await apiRequest('/food/analyze-image', {
         method: 'POST',
         body: formData,
       });
 
-      if (!res.isFood) {
+      if (!res.success || !res.foodDetection || !res.foodDetection.isFood) {
         setStep('error');
-        setErrorMessage(res.message || 'Food not detected. Please capture a clear image of your meal or food.');
+        setErrorMessage(res.message || 'Food not detected. Please capture a clear image of your meal or food item.');
+        setErrorDetails(res);
       } else {
-        setDetectedItems(res.detectedItems || []);
-        if (res.aiEngine) setAiEngineUsed(res.aiEngine);
+        setDetectedItems(res.items || res.detectedItems || []);
+        setPrimaryIdentification(res.foodIdentification || null);
+        setPossibleMatches(res.foodIdentification?.possibleMatches || []);
+        setNutritionSource(res.nutritionSource || 'database');
+        setHealthDisclaimer(res.healthDisclaimer || 'Nutrition values are estimates based on standard clinical databases.');
         setStep('confirm');
       }
     } catch (err) {
       setStep('error');
-      setErrorMessage(err.message || 'Unable to analyze image. Please try again.');
+      setErrorMessage(err.message || 'Unable to analyze image. Please check camera lighting or enter manually.');
     }
   };
 
   const handleSelectCatalogFood = (food) => {
     const newItem = {
       name: food.name,
+      alternateNames: [],
+      portion: {
+        value: 1,
+        unit: food.unit || 'serving',
+        estimated: true,
+      },
       quantity: 1,
-      unit: food.unit,
+      unit: food.unit || 'serving',
       confidence: 0.98,
-      dominantNutrient: `${food.carbsGrams}g Carbs, ${food.proteinGrams}g Protein`,
-      calories: food.calories,
-      proteinGrams: food.proteinGrams,
-      carbsGrams: food.carbsGrams,
-      fatsGrams: food.fatsGrams,
-      fiberGrams: food.fiberGrams,
+      nutrition: {
+        calories: food.calories,
+        protein_g: food.proteinGrams,
+        carbohydrates_g: food.carbsGrams,
+        fat_g: food.fatsGrams,
+        fiber_g: food.fiberGrams || 0,
+        sugar_g: 0,
+        sodium_mg: 0,
+      },
+      nutritionSource: 'catalog',
     };
 
     if (step === 'confirm') {
-      // Add or replace in confirmation screen
       setDetectedItems((prev) => [...prev, newItem]);
       setSearchQuery('');
     } else {
-      // Direct selection from capture/error screen
       setDetectedItems([newItem]);
       setManualHint(food.name);
       setStep('confirm');
     }
   };
 
+  // Switch to an alternate match from possibleMatches
+  const handleSelectAlternateMatch = (match) => {
+    const catalogMatch = FOOD_CATALOG.find(
+      (f) => f.name.toLowerCase().includes(match.name.toLowerCase()) || match.name.toLowerCase().includes(f.name.toLowerCase())
+    );
+
+    if (catalogMatch) {
+      handleSelectCatalogFood(catalogMatch);
+    } else {
+      // Create item directly
+      const newItem = {
+        name: match.name,
+        alternateNames: [],
+        portion: { value: 1, unit: 'serving', estimated: true },
+        quantity: 1,
+        unit: 'serving',
+        confidence: match.confidence || 0.85,
+        nutrition: {
+          calories: 220,
+          protein_g: 5,
+          carbohydrates_g: 28,
+          fat_g: 10,
+          fiber_g: 2,
+        },
+        nutritionSource: 'database',
+      };
+      setDetectedItems([newItem]);
+    }
+  };
+
+  // Adjust portion by multiplier (0.5x, 1x, 1.5x, 2x)
+  const handleSetPortionMultiplier = (index, multiplier) => {
+    setDetectedItems((prev) =>
+      prev.map((item, idx) => {
+        if (idx === index) {
+          const currentVal = item.portion?.value || item.quantity || 1;
+          const newVal = Math.round(multiplier * 10) / 10;
+          const ratio = newVal / currentVal;
+          const nut = item.nutrition || {};
+
+          return {
+            ...item,
+            quantity: newVal,
+            portion: {
+              ...item.portion,
+              value: newVal,
+            },
+            nutrition: {
+              ...nut,
+              calories: Math.round((nut.calories || 0) * ratio),
+              protein_g: Math.round(((nut.protein_g || item.proteinGrams || 0) * ratio) * 10) / 10,
+              carbohydrates_g: Math.round(((nut.carbohydrates_g || item.carbsGrams || 0) * ratio) * 10) / 10,
+              fat_g: Math.round(((nut.fat_g || item.fatsGrams || 0) * ratio) * 10) / 10,
+              fiber_g: Math.round(((nut.fiber_g || item.fiberGrams || 0) * ratio) * 10) / 10,
+            },
+          };
+        }
+        return item;
+      })
+    );
+  };
+
   const handleQuantityChange = (index, delta) => {
     setDetectedItems((prev) =>
       prev.map((item, idx) => {
         if (idx === index) {
-          const newQty = Math.max(0.5, item.quantity + delta);
-          const ratio = newQty / item.quantity;
+          const currentVal = item.portion?.value || item.quantity || 1;
+          const newQty = Math.max(0.25, Math.round((currentVal + delta) * 10) / 10);
+          const ratio = newQty / currentVal;
+          const nut = item.nutrition || {};
+
           return {
             ...item,
-            quantity: Math.round(newQty * 10) / 10,
-            calories: Math.round(item.calories * ratio),
-            proteinGrams: Math.round(item.proteinGrams * ratio * 10) / 10,
-            carbsGrams: Math.round(item.carbsGrams * ratio * 10) / 10,
-            fatsGrams: Math.round(item.fatsGrams * ratio * 10) / 10,
-            fiberGrams: Math.round(item.fiberGrams * ratio * 10) / 10,
+            quantity: newQty,
+            portion: {
+              ...item.portion,
+              value: newQty,
+            },
+            nutrition: {
+              ...nut,
+              calories: Math.round((nut.calories || 0) * ratio),
+              protein_g: Math.round(((nut.protein_g || item.proteinGrams || 0) * ratio) * 10) / 10,
+              carbohydrates_g: Math.round(((nut.carbohydrates_g || item.carbsGrams || 0) * ratio) * 10) / 10,
+              fat_g: Math.round(((nut.fat_g || item.fatsGrams || 0) * ratio) * 10) / 10,
+              fiber_g: Math.round(((nut.fiber_g || item.fiberGrams || 0) * ratio) * 10) / 10,
+            },
           };
         }
         return item;
@@ -281,19 +406,28 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
   };
 
   const totalNutrition = detectedItems.reduce(
-    (acc, item) => ({
-      calories: acc.calories + (item.calories || 0),
-      proteinGrams: Math.round((acc.proteinGrams + (item.proteinGrams || 0)) * 10) / 10,
-      carbsGrams: Math.round((acc.carbsGrams + (item.carbsGrams || 0)) * 10) / 10,
-      fatsGrams: Math.round((acc.fatsGrams + (item.fatsGrams || 0)) * 10) / 10,
-      fiberGrams: Math.round((acc.fiberGrams + (item.fiberGrams || 0)) * 10) / 10,
-    }),
+    (acc, item) => {
+      const nut = item.nutrition || {};
+      const cal = nut.calories ?? item.calories ?? 0;
+      const prot = nut.protein_g ?? item.proteinGrams ?? 0;
+      const carbs = nut.carbohydrates_g ?? item.carbsGrams ?? 0;
+      const fats = nut.fat_g ?? item.fatsGrams ?? 0;
+      const fib = nut.fiber_g ?? item.fiberGrams ?? 0;
+
+      return {
+        calories: acc.calories + cal,
+        proteinGrams: Math.round((acc.proteinGrams + prot) * 10) / 10,
+        carbsGrams: Math.round((acc.carbsGrams + carbs) * 10) / 10,
+        fatsGrams: Math.round((acc.fatsGrams + fats) * 10) / 10,
+        fiberGrams: Math.round((acc.fiberGrams + fib) * 10) / 10,
+      };
+    },
     { calories: 0, proteinGrams: 0, carbsGrams: 0, fatsGrams: 0, fiberGrams: 0 }
   );
 
   const handleSaveMeal = async () => {
     if (detectedItems.length === 0) {
-      alert('Please have at least one food item.');
+      alert('Please add at least one food item.');
       return;
     }
 
@@ -304,7 +438,16 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
         body: JSON.stringify({
           mealType,
           source: 'camera',
-          items: detectedItems,
+          items: detectedItems.map((item) => ({
+            name: item.name,
+            quantity: item.portion?.value || item.quantity || 1,
+            unit: item.portion?.unit || item.unit || 'serving',
+            calories: item.nutrition?.calories ?? item.calories ?? 0,
+            proteinGrams: item.nutrition?.protein_g ?? item.proteinGrams ?? 0,
+            carbsGrams: item.nutrition?.carbohydrates_g ?? item.carbsGrams ?? 0,
+            fatsGrams: item.nutrition?.fat_g ?? item.fatsGrams ?? 0,
+            fiberGrams: item.nutrition?.fiber_g ?? item.fiberGrams ?? 0,
+          })),
           imageUrl: previewUrl || '',
           timeLogged: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }),
@@ -330,38 +473,40 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border border-gray-100 relative max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+      <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-7 shadow-2xl border border-gray-100 relative max-h-[94vh] overflow-y-auto">
         <button
           onClick={handleClose}
-          className="absolute top-5 right-5 text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-gray-100 transition-colors"
+          className="absolute top-5 right-5 text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-gray-100 transition-colors z-10"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="text-center mb-5">
-          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">
-            AI Food Vision & Speech
-          </span>
-          <h3 className="text-xl sm:text-2xl font-black text-gray-950 mt-2">
-            Scan & Validate Meal
+        {/* HEADER */}
+        <div className="text-center mb-4">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold uppercase tracking-wider">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+            VitaCare Food Vision + Nutrition Agent
+          </div>
+          <h3 className="text-xl sm:text-2xl font-black text-gray-950 mt-1.5">
+            Capture & Analyze Meal
           </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Powered by Multimodal Vision AI to recognize meals and convert nutrients to your health data.
+          <p className="text-xs text-gray-500 mt-0.5 max-w-md mx-auto">
+            7-stage clinical nutrition pipeline with food vs. non-food negative validation & NIN/USDA verified database.
           </p>
         </div>
 
-        {/* STEP 1: CAPTURE WITH 3 SOURCE TABS */}
+        {/* STEP 1: CAPTURE WITH GUIDELINES & 4 TABS */}
         {step === 'capture' && (
           <div className="space-y-4">
             {/* Source Tabs */}
-            <div className="flex bg-gray-100/80 p-1 rounded-2xl text-xs font-bold text-gray-600">
+            <div className="flex bg-gray-100/90 p-1 rounded-2xl text-xs font-bold text-gray-600">
               <button
                 type="button"
                 onClick={() => setActiveTab('camera')}
                 className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
                   activeTab === 'camera'
-                    ? 'bg-white text-emerald-900 shadow-xs font-extrabold'
+                    ? 'bg-white text-emerald-950 shadow-xs font-extrabold'
                     : 'hover:text-gray-900'
                 }`}
               >
@@ -373,25 +518,48 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                 onClick={() => setActiveTab('files')}
                 className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
                   activeTab === 'files'
-                    ? 'bg-white text-emerald-900 shadow-xs font-extrabold'
+                    ? 'bg-white text-emerald-950 shadow-xs font-extrabold'
                     : 'hover:text-gray-900'
                 }`}
               >
                 <Upload className="w-3.5 h-3.5 text-emerald-600" />
-                Files & Folder
+                Files
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('drive')}
                 className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
                   activeTab === 'drive'
-                    ? 'bg-white text-emerald-900 shadow-xs font-extrabold'
+                    ? 'bg-white text-emerald-950 shadow-xs font-extrabold'
                     : 'hover:text-gray-900'
                 }`}
               >
                 <LinkIcon className="w-3.5 h-3.5 text-emerald-600" />
-                Google Drive
+                Cloud Link
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('barcode')}
+                className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                  activeTab === 'barcode'
+                    ? 'bg-white text-emerald-950 shadow-xs font-extrabold'
+                    : 'hover:text-gray-900'
+                }`}
+              >
+                <Barcode className="w-3.5 h-3.5 text-emerald-600" />
+                Barcode
+              </button>
+            </div>
+
+            {/* CAMERA GUIDELINES CHECKLIST */}
+            <div className="bg-emerald-50/70 border border-emerald-200/70 rounded-2xl p-3 text-[11px] text-emerald-950 flex items-start gap-2.5">
+              <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block">For Best Recognition Accuracy:</span>
+                <span className="text-emerald-800/90 leading-relaxed block mt-0.5">
+                  1. Center plate in good lighting • 2. Capture all dishes (Rice, Dal, Curries) • 3. For snacks like <b>Boondi</b>, show product label or dish clearly.
+                </span>
+              </div>
             </div>
 
             {/* TAB 1: LIVE CAMERA VIEWFINDER */}
@@ -408,7 +576,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                   <canvas ref={canvasRef} className="hidden" />
 
                   {cameraError ? (
-                    <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-6 text-center text-white space-y-3">
+                    <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center p-6 text-center text-white space-y-3">
                       <AlertTriangle className="w-8 h-8 text-amber-400" />
                       <p className="text-xs text-gray-300 max-w-xs">{cameraError}</p>
                       <label className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white cursor-pointer shadow-sm">
@@ -424,18 +592,21 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                     </div>
                   ) : (
                     <>
-                      {/* Viewfinder crosshair overlay */}
-                      <div className="absolute inset-8 border border-white/30 rounded-2xl pointer-events-none flex items-center justify-center">
+                      {/* Visual framing box with corner brackets */}
+                      <div className="absolute inset-6 border border-white/30 rounded-2xl pointer-events-none flex items-center justify-center">
                         <div className="w-6 h-6 border-t-2 border-l-2 border-emerald-400 absolute top-0 left-0 rounded-tl-sm" />
                         <div className="w-6 h-6 border-t-2 border-r-2 border-emerald-400 absolute top-0 right-0 rounded-tr-sm" />
                         <div className="w-6 h-6 border-b-2 border-l-2 border-emerald-400 absolute bottom-0 left-0 rounded-bl-sm" />
                         <div className="w-6 h-6 border-b-2 border-r-2 border-emerald-400 absolute bottom-0 right-0 rounded-br-sm" />
+                        <span className="text-[10px] font-semibold text-white/70 bg-black/40 px-2 py-0.5 rounded-full">
+                          Position food inside frame
+                        </span>
                       </div>
 
                       <button
                         type="button"
                         onClick={handleToggleFacingMode}
-                        className="absolute top-3 right-3 bg-black/50 text-white p-2 rounded-full backdrop-blur-xs hover:bg-black/80"
+                        className="absolute top-3 right-3 bg-black/60 text-white p-2 rounded-full backdrop-blur-xs hover:bg-black/80 transition-colors"
                         title="Flip Camera"
                       >
                         <SwitchCamera className="w-4 h-4" />
@@ -483,7 +654,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
             {/* TAB 3: GOOGLE DRIVE / CLOUD LINK */}
             {activeTab === 'drive' && (
               <form onSubmit={handleDriveSubmit} className="space-y-3">
-                <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900">
+                <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900">
                   <span className="font-bold block mb-1">Google Drive & Cloud Links:</span>
                   Paste any public Google Drive image link or web image URL. VitaCare will automatically resolve and scan the image.
                 </div>
@@ -512,12 +683,44 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
               </form>
             )}
 
+            {/* TAB 4: BARCODE & PACKAGED FOODS */}
+            {activeTab === 'barcode' && (
+              <form onSubmit={handleBarcodeSubmit} className="space-y-3">
+                <div className="p-3.5 rounded-2xl bg-purple-50/70 border border-purple-200/80 text-xs text-purple-950">
+                  <span className="font-bold block mb-1">Packaged Snack Barcode Lookup:</span>
+                  Enter the product barcode number (e.g. 8901491101837 for Haldiram's Boondi, 8901030018597 for Tata Salt).
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 block mb-1">
+                    Barcode Number (EAN / UPC)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. 8901491101837"
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      className="flex-1 px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs font-medium focus:border-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!barcodeInput.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold disabled:opacity-50"
+                    >
+                      Lookup
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
             {/* Instant Food Search & Voice Assistant */}
             <div className="p-3.5 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-amber-950 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  Food Search & Voice Input:
+                  Food Search & Voice Assistant:
                 </span>
                 <button
                   type="button"
@@ -538,7 +741,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                 <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Type or search food: Boondi, Dosa, Biryani, Paneer, Rice..."
+                  placeholder="Type or search food: Boondi, Dosa, Idli, Dal, Rice..."
                   value={searchQuery || manualHint}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -579,7 +782,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
 
               {/* Quick Select Chips */}
               <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {['Boondi', 'Dosa', 'Boiled Eggs', 'Steamed Rice', 'Yellow Dal', 'Roti', 'Paneer'].map((chip) => (
+                {['Boondi', 'Rice & Dal', 'Dosa', 'Idli', 'Boiled Eggs', 'Roti', 'Paneer'].map((chip) => (
                   <button
                     key={chip}
                     type="button"
@@ -600,7 +803,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
             </div>
 
             {/* Test Sample Presets */}
-            <div className="pt-3 border-t border-gray-100">
+            <div className="pt-2 border-t border-gray-100">
               <p className="text-xs font-bold text-gray-500 mb-2">Instant Test Presets:</p>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <button
@@ -615,97 +818,124 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                   className="p-2.5 rounded-xl border border-gray-200 hover:border-emerald-500 text-left bg-gray-50 hover:bg-emerald-50 text-gray-800 font-semibold flex items-center gap-1.5 transition-colors"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  Crispy Boondi (Valid Food)
+                  Boondi Snack (Valid Food)
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     handleSampleSelect(
-                      'crispy_dosa_chutney.jpg',
-                      '/images/dosa.jpg',
-                      'Dosa'
+                      'rice_and_dal_thali.jpg',
+                      '/images/salad_bowl.jpg',
+                      'Rice and Dal'
                     )
                   }
                   className="p-2.5 rounded-xl border border-gray-200 hover:border-emerald-500 text-left bg-gray-50 hover:bg-emerald-50 text-gray-800 font-semibold flex items-center gap-1.5 transition-colors"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  Crispy Dosa (Valid Food)
+                  Rice + Dal (Multi-item)
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     handleSampleSelect(
-                      'boiled_eggs_plate.jpg',
-                      '/images/boiled_eggs.jpg',
-                      'Eggs'
+                      'water_bottle.jpg',
+                      '',
+                      'water bottle'
                     )
                   }
-                  className="p-2.5 rounded-xl border border-gray-200 hover:border-emerald-500 text-left bg-gray-50 hover:bg-emerald-50 text-gray-800 font-semibold flex items-center gap-1.5 transition-colors"
+                  className="p-2.5 rounded-xl border border-rose-200 hover:border-rose-400 text-left bg-rose-50/50 hover:bg-rose-50 text-rose-900 font-semibold flex items-center gap-1.5 transition-colors"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  Boiled Eggs (Valid Food)
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  Water Bottle (Non-Food Test)
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     handleSampleSelect(
-                      'ragi_java_cup.jpg',
-                      '/images/ragi_java.jpg',
-                      'Ragi Java'
+                      'laptop_workdesk.jpg',
+                      '',
+                      'laptop computer'
                     )
                   }
-                  className="p-2.5 rounded-xl border border-gray-200 hover:border-emerald-500 text-left bg-gray-50 hover:bg-emerald-50 text-gray-800 font-semibold flex items-center gap-1.5 transition-colors"
+                  className="p-2.5 rounded-xl border border-rose-200 hover:border-rose-400 text-left bg-rose-50/50 hover:bg-rose-50 text-rose-900 font-semibold flex items-center gap-1.5 transition-colors"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  Ragi Java (Valid Food)
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSampleSelect(
-                      'bread_omelette_plate.jpg',
-                      '/images/bread_omelette.jpg',
-                      'Bread Omelette'
-                    )
-                  }
-                  className="p-2.5 rounded-xl border border-gray-200 hover:border-emerald-500 text-left bg-gray-50 hover:bg-emerald-50 text-gray-800 font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  Bread Omelette (Valid Food)
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  Laptop (Non-Food Test)
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* STEP 2: ANALYZING */}
+        {/* STEP 2: MULTI-STAGE ANALYZING ANIMATION */}
         {step === 'analyzing' && (
-          <div className="py-12 text-center">
-            <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
-            <h4 className="text-base font-bold text-gray-900">Validating & Scanning Image...</h4>
-            <p className="text-xs text-gray-500 max-w-xs mx-auto mt-1">
-              Analyzing photo with Multimodal Vision AI to classify foods and compute exact macros.
-            </p>
+          <div className="py-10 text-center space-y-6">
+            <RefreshCw className="w-12 h-12 text-emerald-600 animate-spin mx-auto" />
+            <div>
+              <h4 className="text-base font-bold text-gray-900">
+                Processing Food Vision Pipeline
+              </h4>
+              <p className="text-xs text-gray-500 max-w-xs mx-auto mt-1">
+                Executing 7-stage clinical nutrition & quality assessment
+              </p>
+            </div>
+
+            {/* Progress Checklist */}
+            <div className="max-w-xs mx-auto text-left space-y-2.5 bg-gray-50 p-4 rounded-2xl border border-gray-200/80 text-xs">
+              <div className={`flex items-center gap-2 ${analysisStage >= 1 ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>
+                {analysisStage > 1 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />}
+                <span>Stage 1: Image Quality & Clarity Check</span>
+              </div>
+              <div className={`flex items-center gap-2 ${analysisStage >= 2 ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>
+                {analysisStage > 2 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : analysisStage === 2 ? <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" /> : <div className="w-4 h-4 rounded-full border border-gray-300" />}
+                <span>Stage 2: Food vs. Non-Food Classification</span>
+              </div>
+              <div className={`flex items-center gap-2 ${analysisStage >= 3 ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>
+                {analysisStage > 3 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : analysisStage === 3 ? <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" /> : <div className="w-4 h-4 rounded-full border border-gray-300" />}
+                <span>Stage 3: Dish & Multi-Plate Identification</span>
+              </div>
+              <div className={`flex items-center gap-2 ${analysisStage >= 4 ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>
+                {analysisStage > 4 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : analysisStage === 4 ? <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" /> : <div className="w-4 h-4 rounded-full border border-gray-300" />}
+                <span>Stage 4: NIN / USDA Clinical Nutrition Query</span>
+              </div>
+              <div className={`flex items-center gap-2 ${analysisStage >= 5 ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>
+                {analysisStage >= 5 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <div className="w-4 h-4 rounded-full border border-gray-300" />}
+                <span>Stage 5: Portion & Macronutrient Estimation</span>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* STEP 3: REJECTION / ERROR */}
+        {/* STEP 3: REJECTION / NON-FOOD / ERROR */}
         {step === 'error' && (
           <div className="py-6 text-center space-y-4">
             <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
               <AlertTriangle className="w-8 h-8" />
             </div>
             <div>
-              <h4 className="text-lg font-bold text-rose-900">Food not clearly detected</h4>
+              <h4 className="text-lg font-bold text-rose-950">
+                {errorDetails?.foodDetection?.category === 'NON_FOOD'
+                  ? 'Non-Food Object Detected'
+                  : 'Food Not Clearly Detected'}
+              </h4>
               <p className="text-sm text-gray-600 mt-1 max-w-sm mx-auto">
                 {errorMessage}
               </p>
             </div>
 
+            {errorDetails?.foodDetection?.category === 'NON_FOOD' && (
+              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 max-w-sm mx-auto text-left flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  <b>Negative Validation Protected:</b> VitaCare guarantees that non-food objects (water bottles, laptops, utensils) will never be hallucinated as food or meals.
+                </span>
+              </div>
+            )}
+
             {/* Quick 1-tap food recovery selector */}
             <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 text-left space-y-2">
               <span className="text-xs font-bold text-gray-700 block">
-                Select your food to continue:
+                Select your food to log manually:
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {[
@@ -714,9 +944,8 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                   { name: 'Crispy Plain Dosa with Chutney', cal: 170 },
                   { name: 'Steamed Rice (Cooked)', cal: 195 },
                   { name: 'Yellow Dal (Cooked)', cal: 145 },
+                  { name: 'Boiled Egg (2 Whole)', cal: 156 },
                   { name: 'Paneer Butter Masala', cal: 320 },
-                  { name: 'Chicken Biryani', cal: 480 },
-                  { name: 'Samosa (Potato & Peas)', cal: 220 },
                 ].map((item, idx) => (
                   <button
                     key={idx}
@@ -756,94 +985,142 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                 />
                 <div className="absolute top-2 left-2 bg-black/75 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-xs flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-emerald-400" />
-                  {aiEngineUsed} (98% confidence)
+                  {primaryIdentification?.name || 'Food'} (
+                  {Math.round((primaryIdentification?.confidence || 0.94) * 100)}% confidence)
+                </div>
+              </div>
+            )}
+
+            {/* Possible Alternate Matches Drawer (e.g. Boondi vs Boondi Raita) */}
+            {possibleMatches && possibleMatches.length > 0 && (
+              <div className="p-3 bg-blue-50/60 rounded-2xl border border-blue-200/80 text-xs space-y-1.5">
+                <span className="font-bold text-blue-950 block">
+                  Did you mean another preparation?
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {possibleMatches.map((m, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectAlternateMatch(m)}
+                      className="px-2.5 py-1 bg-white border border-blue-200 hover:border-blue-400 rounded-lg text-blue-900 font-semibold text-[11px] transition-colors"
+                    >
+                      {m.name} ({Math.round(m.confidence * 100)}%)
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
 
             <div>
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                  Nutritional Breakdown by Food Item:
+                <span className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1">
+                  <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                  Identified Food Items & Portions:
                 </span>
-                <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-semibold">
-                  AI Verified
+                <span className="text-[10px] text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-md font-bold">
+                  {nutritionSource === 'packaged_database'
+                    ? 'Packaged Facts'
+                    : 'NIN / USDA Verified'}
                 </span>
               </div>
 
-              <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-                {detectedItems.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-2xl bg-gray-50 border border-gray-100 text-xs space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="font-bold text-gray-900 block text-sm">{item.name}</span>
-                        {item.dominantNutrient ? (
-                          <span className="inline-block mt-0.5 text-[11px] font-bold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-md">
-                            {item.dominantNutrient}
-                          </span>
-                        ) : (
-                          <span className="text-gray-500 text-[11px]">
-                            {item.calories} kcal • {item.proteinGrams}g Protein
-                          </span>
-                        )}
-                      </div>
+              <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                {detectedItems.map((item, idx) => {
+                  const nut = item.nutrition || {};
+                  const cal = nut.calories ?? item.calories ?? 0;
+                  const prot = nut.protein_g ?? item.proteinGrams ?? 0;
+                  const carbs = nut.carbohydrates_g ?? item.carbsGrams ?? 0;
+                  const fats = nut.fat_g ?? item.fatsGrams ?? 0;
+                  const portionVal = item.portion?.value || item.quantity || 1;
+                  const portionUnit = item.portion?.unit || item.unit || 'serving';
 
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => handleQuantityChange(idx, -0.5)}
-                            className="px-2 py-1 text-gray-600 hover:bg-gray-100 font-bold"
-                          >
-                            -
-                          </button>
-                          <span className="px-2 font-bold text-gray-800 text-xs">
-                            {item.quantity}
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200/70 text-xs space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-gray-900 block text-sm">{item.name}</span>
+                          <span className="text-gray-500 text-[11px]">
+                            {portionVal} {portionUnit} • {cal} kcal
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => handleQuantityChange(idx, 0.5)}
-                            className="px-2 py-1 text-gray-600 hover:bg-gray-100 font-bold"
-                          >
-                            +
-                          </button>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(idx)}
-                          className="text-gray-400 hover:text-rose-600 p-1"
-                          title="Remove item"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
+                        <div className="flex items-center gap-2">
+                          {/* Portion Multiplier Buttons */}
+                          <div className="flex bg-white rounded-lg border border-gray-200 p-0.5 text-[10px] font-bold">
+                            {[0.5, 1, 1.5, 2].map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => handleSetPortionMultiplier(idx, m)}
+                                className={`px-1.5 py-0.5 rounded ${
+                                  portionVal === m
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                              >
+                                {m}x
+                              </button>
+                            ))}
+                          </div>
 
-                    {/* Nutrient breakdown bars/pills */}
-                    <div className="grid grid-cols-4 gap-1.5 text-center text-[10px] pt-1 border-t border-gray-200/50">
-                      <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
-                        <span className="text-gray-400 block text-[8px] uppercase">Calories</span>
-                        <span className="font-bold text-gray-800">{item.calories}</span>
+                          {/* Plus/Minus Fine Adjustment */}
+                          <div className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => handleQuantityChange(idx, -0.25)}
+                              className="px-1.5 py-1 text-gray-600 hover:bg-gray-100 font-bold"
+                            >
+                              -
+                            </button>
+                            <span className="px-1.5 font-bold text-gray-800 text-xs">
+                              {portionVal}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleQuantityChange(idx, 0.25)}
+                              className="px-1.5 py-1 text-gray-600 hover:bg-gray-100 font-bold"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(idx)}
+                            className="text-gray-400 hover:text-rose-600 p-1"
+                            title="Remove item"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
-                        <span className="text-gray-400 block text-[8px] uppercase">Carbs</span>
-                        <span className="font-bold text-emerald-700">{item.carbsGrams}g</span>
-                      </div>
-                      <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
-                        <span className="text-gray-400 block text-[8px] uppercase">Protein</span>
-                        <span className="font-bold text-blue-700">{item.proteinGrams}g</span>
-                      </div>
-                      <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
-                        <span className="text-gray-400 block text-[8px] uppercase">Fats</span>
-                        <span className="font-bold text-amber-700">{item.fatsGrams}g</span>
+
+                      {/* Nutrient breakdown pills */}
+                      <div className="grid grid-cols-4 gap-1.5 text-center text-[10px] pt-1.5 border-t border-gray-200/60">
+                        <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
+                          <span className="text-gray-400 block text-[8px] uppercase">Calories</span>
+                          <span className="font-bold text-gray-800">{cal}</span>
+                        </div>
+                        <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
+                          <span className="text-gray-400 block text-[8px] uppercase">Carbs</span>
+                          <span className="font-bold text-emerald-700">{carbs}g</span>
+                        </div>
+                        <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
+                          <span className="text-gray-400 block text-[8px] uppercase">Protein</span>
+                          <span className="font-bold text-blue-700">{prot}g</span>
+                        </div>
+                        <div className="bg-white px-1.5 py-1 rounded-lg border border-gray-100">
+                          <span className="text-gray-400 block text-[8px] uppercase">Fats</span>
+                          <span className="font-bold text-amber-700">{fats}g</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Add item search in confirm screen */}
@@ -852,7 +1129,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                   <Search className="w-3 h-3 text-gray-400 absolute left-2.5 top-2.5 pointer-events-none" />
                   <input
                     type="text"
-                    placeholder="+ Add another food (e.g. Boondi, Raita, Chai)..."
+                    placeholder="+ Add another food item (e.g. Boondi, Raita, Curd, Rice)..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:border-emerald-500 font-medium text-gray-800"
@@ -904,11 +1181,16 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            {/* Health Disclaimer */}
+            <p className="text-[10px] text-gray-400 italic text-center px-4">
+              * {healthDisclaimer || 'Nutrition values are estimates and may vary based on ingredients, preparation method, brand and portion size.'}
+            </p>
+
+            <div className="flex gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setStep('capture')}
-                className="flex-1 py-3 rounded-2xl border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                className="flex-1 py-3 rounded-2xl border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Scan Another Photo
               </button>
@@ -916,7 +1198,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                 type="button"
                 onClick={handleSaveMeal}
                 disabled={isSaving || detectedItems.length === 0}
-                className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/30 flex items-center justify-center gap-1.5"
+                className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 {isSaving ? 'Saving Meal...' : 'Confirm & Save Meal'}

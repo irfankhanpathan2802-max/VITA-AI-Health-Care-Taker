@@ -1,4 +1,4 @@
-import { analyzeFoodImage } from '../services/aiVisionService.js';
+import { runFoodAnalysisPipeline } from '../services/foodVisionService.js';
 import { parseVoiceMealTranscript } from '../services/aiVoiceService.js';
 import { askAICoach } from '../services/aiCoachService.js';
 import { getAfternoonNutritionAlert, generateTomorrowsPlan } from '../services/recommendationService.js';
@@ -8,33 +8,35 @@ import { Meal, NutritionTarget, Lifestyle, Profile, Product } from '../models/in
 export const analyzePhoto = async (req, res) => {
   try {
     const file = req.file;
-    const { manualHint = '', filename = '', apiKey = '' } = req.body;
+    const { manualHint = '', filename = '', barcode = null, apiKey = '' } = req.body;
     const passedKey = apiKey || req.headers['x-gemini-key'];
 
-    const result = await analyzeFoodImage({
-      filename: file ? (file.filename || file.originalname || 'camera_photo.jpg') : filename,
-      originalname: file ? file.originalname : filename,
-      mimetype: file ? file.mimetype : 'image/jpeg',
+    const result = await runFoodAnalysisPipeline({
       buffer: file ? file.buffer : null,
+      filename: file ? (file.originalname || file.filename) : filename,
+      mimetype: file ? file.mimetype : 'image/jpeg',
       manualHint,
+      barcode,
       apiKey: passedKey,
     });
 
-    if (!result.isFood) {
+    if (!result.foodDetection || !result.foodDetection.isFood) {
       return res.status(200).json({
         success: false,
         isFood: false,
-        message: result.message || 'Food not detected. Please capture a clear image of your meal or food.',
+        message: result.message || 'No food detected. Please capture a clear image of your meal or food.',
         detectedItems: [],
+        ...result,
       });
     }
 
     return res.status(200).json({
       success: true,
       isFood: true,
-      message: result.message,
-      detectedItems: result.detectedItems,
-      totalEstimatedNutrition: result.totalEstimatedNutrition,
+      message: result.message || `Identified ${result.foodIdentification?.name || 'food item'} with ${Math.round((result.foodDetection?.confidence || 0.9) * 100)}% confidence.`,
+      detectedItems: result.items || [],
+      totalEstimatedNutrition: result.nutrition,
+      ...result,
     });
   } catch (error) {
     console.error('analyzePhoto error:', error);
