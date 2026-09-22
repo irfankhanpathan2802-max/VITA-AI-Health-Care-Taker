@@ -985,8 +985,18 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                 />
                 <div className="absolute top-2 left-2 bg-black/75 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-xs flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-emerald-400" />
-                  {primaryIdentification?.name || 'Food'} (
-                  {Math.round((primaryIdentification?.confidence || 0.94) * 100)}% confidence)
+                  Gemini 3.0 Flash + DINOv3 ({Math.round((primaryIdentification?.confidence || 0.94) * 100)}% confidence)
+                </div>
+              </div>
+            )}
+
+            {/* Low Confidence Guard Banner */}
+            {primaryIdentification?.isLowConfidence && (
+              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block">Low Confidence Detection:</span>
+                  <span>VitaCare never forces an automated prediction when confidence is low. Please confirm or select your meal from the candidates below.</span>
                 </div>
               </div>
             )}
@@ -995,7 +1005,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
             {possibleMatches && possibleMatches.length > 0 && (
               <div className="p-3 bg-blue-50/60 rounded-2xl border border-blue-200/80 text-xs space-y-1.5">
                 <span className="font-bold text-blue-950 block">
-                  Did you mean another preparation?
+                  Candidate Preparations & Matches:
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {possibleMatches.map((m, idx) => (

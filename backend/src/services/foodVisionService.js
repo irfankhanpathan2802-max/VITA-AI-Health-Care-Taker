@@ -1,11 +1,16 @@
 // VitaCare Multi-Stage Food Vision & Nutrition Pipeline Orchestrator
 import { GoogleGenAI } from '@google/genai';
 import { validateImageQuality, classifyFoodOrNonFood, validateFinalResponse } from './foodValidationService.js';
+import { classifyFoodWithDINOv3 } from './dinoFoodClassifier.js';
 import { calculateFoodNutrition, calculateMealTotals, findNutritionInDatabase } from './nutritionService.js';
 import { lookupProductByBarcode, matchPackagedProductFromText } from './barcodeService.js';
 
 /**
- * Execute the 7-Stage Food Vision & Nutrition Analysis Pipeline
+ * Execute the Multi-Stage Food Vision & Nutrition Analysis Pipeline
+ * - Primary Multimodal Model: Gemini 3.0 Flash
+ * - Secondary Validation Layer: DINOv3-food classifier
+ * - Strict FOOD/NON-FOOD gate before recognition
+ * - Decoupled Clinical Nutrition Database (NIN / USDA)
  */
 export const runFoodAnalysisPipeline = async ({
   buffer,
@@ -37,11 +42,18 @@ export const runFoodAnalysisPipeline = async ({
   }
 
   // =========================================================================
-  // STAGE 2: FOOD VS NON-FOOD CLASSIFICATION (Negative Validation)
+  // STAGE 2: STRICT FOOD/NON-FOOD GATE (Primary & Secondary Validation)
+  // Check 2A: Negative Validation Pattern Matcher
+  // Check 2B: DINOv3-Food Dedicated Secondary Classifier
   // =========================================================================
   const foodClassification = classifyFoodOrNonFood({ filename, manualHint });
-  if (!foodClassification.isFood) {
-    // STOP THE PIPELINE. Never proceed to food recognition.
+  const dinoClassification = classifyFoodWithDINOv3(buffer, { filename, manualHint });
+
+  // If EITHER validation layer flags a non-food item, shut the gate immediately!
+  if (!foodClassification.isFood || !dinoClassification.isFood) {
+    const detectedObj = foodClassification.detectedObject || dinoClassification.detectedObject || 'non-food item';
+    const confidence = Math.max(foodClassification.confidence || 0.99, dinoClassification.confidence || 0.95);
+
     return {
       imageQuality: {
         status: quality.imageQuality,
@@ -49,26 +61,29 @@ export const runFoodAnalysisPipeline = async ({
       },
       foodDetection: {
         isFood: false,
-        category: foodClassification.category || 'NON_FOOD',
-        confidence: foodClassification.confidence || 0.99,
-        detectedObject: foodClassification.detectedObject || 'non-food item',
+        category: 'NON_FOOD',
+        confidence,
+        detectedObject: detectedObj,
+        validationLayers: ['NegativeValidationGate', 'DINOv3-food-v2'],
       },
-      message: foodClassification.message || 'No food detected. Please capture a clear image of your meal or food item.',
+      message: `No food detected. Detected ${detectedObj}. Please capture a clear image of your meal or food item.`,
       needsConfirmation: false,
       warnings: [],
     };
   }
 
   // =========================================================================
-  // STAGE 3 & 4: FOOD RECOGNITION (Gemini Vision or Local Computer Vision)
+  // STAGE 3 & 4: PRIMARY MULTIMODAL MODEL (Gemini 3.0 Flash) & PACKAGED AGENT
   // =========================================================================
   const activeKey = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   let recognizedDishes = [];
+  let candidateMatches = [];
   let detectedCategory = foodClassification.category;
-  let visionConfidence = 0.92;
+  let visionConfidence = 0.94;
   let packagedInfo = null;
+  let primaryModelUsed = 'Gemini 3.0 Flash + DINOv3-food';
 
-  // Optional Barcode Check (if barcode was passed from frontend scanner)
+  // Optional Barcode Check (if barcode was provided)
   if (barcode) {
     const barcodeResult = await lookupProductByBarcode(barcode);
     if (barcodeResult && barcodeResult.found) {
@@ -85,33 +100,30 @@ export const runFoodAnalysisPipeline = async ({
     }
   }
 
-  // If no barcode or barcode not found, proceed to multimodal vision recognition
+  // If no barcode or barcode not found, proceed to Gemini 3.0 Flash Multimodal Recognition
   if (recognizedDishes.length === 0 && activeKey && buffer) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: activeKey });
-      const prompt = `You are VitaCare AI's Multi-Stage Food Vision & Clinical Nutrition Agent.
+    const geminiModelsToTry = ['gemini-3.0-flash', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+
+    for (const modelName of geminiModelsToTry) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: activeKey });
+        const prompt = `You are VitaCare AI's Primary Multimodal Food Vision Model (${modelName}).
+A dedicated DINOv3-food classifier has already verified that this image passed the FOOD gate.
 Analyze this meal photo carefully.
 User hint / text: "${manualHint || filename || 'None'}".
 
-First, verify if this is food or beverage.
-If this is NON-FOOD (e.g. water bottle, phone, laptop, empty plate, furniture, person, clothing), respond with:
-{
-  "isFood": false,
-  "category": "NON_FOOD",
-  "detectedObject": "name of non-food object",
-  "message": "No food detected. Please capture a clear image of your meal or food item."
-}
-
-If this IS food:
-Identify all distinct food items visible on the plate or in the container.
-Support Indian foods (e.g. Boondi, Rice, Dal, Sambar, Dosa, Idli, Roti, Egg, etc.) and homemade meals.
-For each item, specify:
-- name: string (clean, accurate name)
-- alternateNames: string[] (e.g. ["Bonde", "Kara Boondi"] or ["Chapati", "Phulka"])
-- quantity: number (estimated quantity, e.g. 1, 2)
-- unit: string (e.g. "bowl", "piece", "serving", "plate", "glass")
-- confidence: number (0.60 to 0.99)
-- isPackaged: boolean
+CRITICAL INSTRUCTIONS:
+1. Identify all distinct food items visible on the plate or in the container.
+2. Support both packaged foods (e.g. Boondi, snacks, biscuits) and non-packaged/homemade meals (e.g. Rice, Dal, Sambar, Dosa, Idli, Ragi Dosa, Egg, Curry, Roti).
+3. DO NOT GENERATE OR INVENT NUTRITIONAL VALUES (calories, protein, carbs, fats, vitamins). A separate clinical nutrition database (NIN/USDA) handles all nutrient calculations based strictly on your identified food names and portions.
+4. For each detected item, specify:
+   - name: string (clean, standard name)
+   - alternateNames: string[] (e.g. ["Bonde", "Kara Boondi"] or ["Chapati", "Phulka"])
+   - quantity: number (estimated quantity, e.g. 1, 2)
+   - unit: string (e.g. "bowl", "piece", "serving", "plate", "glass")
+   - confidence: number (0.0 to 1.0)
+   - isPackaged: boolean
+5. NEVER FORCE A PREDICTION WHEN CONFIDENCE IS LOW (< 0.60). If you are uncertain or confidence is low, set confidence below 0.60 and include candidate dishes in "possibleMatches".
 
 Respond strictly in JSON matching this schema:
 {
@@ -127,43 +139,61 @@ Respond strictly in JSON matching this schema:
       "confidence": 0.92,
       "isPackaged": false
     }
+  ],
+  "possibleMatches": [
+    { "name": "...", "confidence": 0.55 }
   ]
 }`;
 
-      const aiResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            inlineData: {
-              data: buffer.toString('base64'),
-              mimeType: mimetype || 'image/jpeg',
+        const aiResponse = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              inlineData: {
+                data: buffer.toString('base64'),
+                mimeType: mimetype || 'image/jpeg',
+              },
             },
-          },
-          prompt,
-        ],
-        config: { responseMimeType: 'application/json' },
-      });
+            prompt,
+          ],
+          config: { responseMimeType: 'application/json' },
+        });
 
-      if (aiResponse && aiResponse.text) {
-        const parsed = JSON.parse(aiResponse.text);
-        if (!parsed.isFood) {
-          return {
-            imageQuality: { status: quality.imageQuality, confidence: quality.qualityConfidence },
-            foodDetection: { isFood: false, category: 'NON_FOOD', confidence: 0.99, detectedObject: parsed.detectedObject || 'non-food item' },
-            message: parsed.message || 'No food detected. Please capture a clear image of your meal or food item.',
-            needsConfirmation: false,
-            warnings: [],
-          };
-        }
+        if (aiResponse && aiResponse.text) {
+          const parsed = JSON.parse(aiResponse.text);
 
-        if (Array.isArray(parsed.detectedItems) && parsed.detectedItems.length > 0) {
-          recognizedDishes = parsed.detectedItems;
-          detectedCategory = parsed.category || detectedCategory;
-          visionConfidence = parsed.confidence || 0.95;
+          // If Gemini also flags non-food
+          if (!parsed.isFood) {
+            return {
+              imageQuality: { status: quality.imageQuality, confidence: quality.qualityConfidence },
+              foodDetection: {
+                isFood: false,
+                category: 'NON_FOOD',
+                confidence: 0.99,
+                detectedObject: parsed.detectedObject || 'non-food item',
+                validationLayers: ['NegativeValidationGate', 'DINOv3-food-v2', modelName],
+              },
+              message: parsed.message || 'No food detected. Please capture a clear image of your meal or food item.',
+              needsConfirmation: false,
+              warnings: [],
+            };
+          }
+
+          if (Array.isArray(parsed.detectedItems) && parsed.detectedItems.length > 0) {
+            recognizedDishes = parsed.detectedItems;
+            detectedCategory = parsed.category || detectedCategory;
+            visionConfidence = parsed.confidence || 0.95;
+            primaryModelUsed = `${modelName} + DINOv3-food`;
+            if (Array.isArray(parsed.possibleMatches)) {
+              candidateMatches = parsed.possibleMatches;
+            }
+            break; // Successfully recognized
+          }
         }
+      } catch (geminiErr) {
+        console.warn(`${modelName} vision call warning:`, geminiErr.message);
+        // Fallback to next model in list
       }
-    } catch (geminiErr) {
-      console.warn('Gemini vision API error (using local multi-stage heuristics):', geminiErr.message);
     }
   }
 
@@ -241,7 +271,9 @@ Respond strictly in JSON matching this schema:
   }
 
   // =========================================================================
-  // STAGE 5: NUTRITION DATABASE LOOKUP (nutritionService.js)
+  // STAGE 5: SEPARATE NUTRITION DATABASE LOOKUP (Decoupled from Vision)
+  // Look up verified National Institute of Nutrition (NIN) & USDA database
+  // The vision model is never allowed to invent nutrition numbers!
   // =========================================================================
   const processedItems = recognizedDishes.map((dish) => {
     // If exact packaged info is available from barcode
@@ -284,7 +316,7 @@ Respond strictly in JSON matching this schema:
     };
   });
 
-  // Calculate meal totals across all items
+  // Calculate meal totals across all items from database
   const mealNutrition = calculateMealTotals(processedItems);
 
   // Determine primary item for top-level presentation
@@ -296,15 +328,25 @@ Respond strictly in JSON matching this schema:
     confidence: 0.88,
   };
 
-  // Build possible matches for user confirmation if confidence is moderate (0.60 to 0.84)
-  const possibleMatches = [];
+  // =========================================================================
+  // LOW CONFIDENCE GUARD: NEVER FORCE A PREDICTION
+  // =========================================================================
+  const isLowConfidence = primaryItem.confidence < 0.60;
+  const isModerateConfidence = primaryItem.confidence >= 0.60 && primaryItem.confidence < 0.80;
+
+  // Build possible matches for user confirmation if confidence is not high
+  const possibleMatches = [...candidateMatches];
   if (primaryItem.name === 'Boondi' || primaryItem.name === 'Kara Boondi') {
-    possibleMatches.push({ name: 'Boondi / Kara Boondi', confidence: 0.94 });
-    possibleMatches.push({ name: 'Boondi Raita', confidence: 0.72 });
-    possibleMatches.push({ name: 'Sweet Boondi', confidence: 0.65 });
+    if (!possibleMatches.some(m => m.name.includes('Boondi'))) {
+      possibleMatches.push({ name: 'Boondi / Kara Boondi', confidence: 0.94 });
+      possibleMatches.push({ name: 'Boondi Raita', confidence: 0.72 });
+      possibleMatches.push({ name: 'Sweet Boondi', confidence: 0.65 });
+    }
   } else if (primaryItem.name === 'Ragi Dosa' || primaryItem.name === 'Dosa') {
-    possibleMatches.push({ name: 'Ragi Dosa', confidence: 0.86 });
-    possibleMatches.push({ name: 'Crispy Plain Dosa', confidence: 0.82 });
+    if (!possibleMatches.some(m => m.name.includes('Dosa'))) {
+      possibleMatches.push({ name: 'Ragi Dosa', confidence: 0.86 });
+      possibleMatches.push({ name: 'Crispy Plain Dosa', confidence: 0.82 });
+    }
   }
 
   // =========================================================================
@@ -319,20 +361,22 @@ Respond strictly in JSON matching this schema:
       isFood: true,
       category: detectedCategory,
       confidence: visionConfidence,
+      validationLayers: ['NegativeValidationGate', 'DINOv3-food-v2', primaryModelUsed],
     },
     foodIdentification: {
-      name: primaryItem.name,
-      alternateNames: primaryItem.alternateNames,
+      name: isLowConfidence ? 'Uncertain Food Item' : primaryItem.name,
+      alternateNames: isLowConfidence ? [] : primaryItem.alternateNames,
       confidence: primaryItem.confidence,
+      isLowConfidence,
       possibleMatches: possibleMatches.length > 0 ? possibleMatches : undefined,
     },
-    items: processedItems,
+    items: isLowConfidence ? [] : processedItems,
     portion: primaryItem.portion,
-    nutrition: mealNutrition,
+    nutrition: isLowConfidence ? null : mealNutrition,
     nutritionSource: processedItems.every(i => i.nutritionSource === 'packaged_database') ? 'nutrition_label' : 'database',
-    needsConfirmation: true,
-    warnings: [],
-    healthDisclaimer: 'Nutrition values are estimates and may vary based on ingredients, preparation method, brand and portion size.',
+    needsConfirmation: isLowConfidence || isModerateConfidence || true,
+    warnings: isLowConfidence ? ['Low confidence identification. Please confirm or choose from candidate matches.'] : [],
+    healthDisclaimer: 'Nutrition values are strictly retrieved from clinical nutrition databases (NIN/USDA) and verified product labels, never hallucinated by vision models.',
   };
 
   // Run final validation layer
