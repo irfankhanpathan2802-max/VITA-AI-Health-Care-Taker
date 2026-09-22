@@ -8,7 +8,8 @@ import { Meal, NutritionTarget, Lifestyle, Profile, Product } from '../models/in
 export const analyzePhoto = async (req, res) => {
   try {
     const file = req.file;
-    const { manualHint = '', filename = '' } = req.body;
+    const { manualHint = '', filename = '', apiKey = '' } = req.body;
+    const passedKey = apiKey || req.headers['x-gemini-key'];
 
     const result = await analyzeFoodImage({
       filename: file ? (file.filename || file.originalname || 'camera_photo.jpg') : filename,
@@ -16,6 +17,7 @@ export const analyzePhoto = async (req, res) => {
       mimetype: file ? file.mimetype : 'image/jpeg',
       buffer: file ? file.buffer : null,
       manualHint,
+      apiKey: passedKey,
     });
 
     if (!result.isFood) {

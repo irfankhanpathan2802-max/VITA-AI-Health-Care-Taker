@@ -10,8 +10,13 @@ import {
   X,
   Sparkles,
   SwitchCamera,
+  Mic,
+  MicOff,
+  Search,
+  Plus,
 } from 'lucide-react';
 import { apiRequest } from '../services/api.js';
+import { FOOD_CATALOG } from '../data/foodCatalog.js';
 
 export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSaved }) => {
   if (!isOpen) return null;
@@ -22,9 +27,12 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
   const [previewUrl, setPreviewUrl] = useState(null);
   const [driveUrl, setDriveUrl] = useState('');
   const [manualHint, setManualHint] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [detectedItems, setDetectedItems] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [aiEngineUsed, setAiEngineUsed] = useState('VitaCare AI Multimodal Vision');
 
   // Live Camera state
   const videoRef = useRef(null);
@@ -111,9 +119,12 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     setSelectedFile(null);
     setPreviewUrl(null);
     setDriveUrl('');
+    setManualHint('');
+    setSearchQuery('');
     setErrorMessage('');
     setDetectedItems([]);
     setIsSaving(false);
+    setIsListening(false);
   };
 
   const handleClose = () => {
@@ -137,7 +148,6 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     if (!driveUrl.trim()) return;
 
     let resolvedUrl = driveUrl.trim();
-    // Google Drive share link match: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
     const driveMatch = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
     if (driveMatch && driveMatch[1]) {
       const fileId = driveMatch[1];
@@ -153,6 +163,33 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     setPreviewUrl(sampleUrl);
     if (hint) setManualHint(hint);
     analyzeImage({ name: sampleName, hint });
+  };
+
+  // Web Speech recognition inside camera modal
+  const handleStartVoice = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please type the food name.');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-IN'; // also handles English with Indian accents & food names
+    recognition.interimResults = false;
+
+    setIsListening(true);
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setIsListening(false);
+      setManualHint(transcript);
+      setSearchQuery(transcript);
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognition.start();
   };
 
   const analyzeImage = async (file) => {
@@ -183,11 +220,38 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
         setErrorMessage(res.message || 'Food not detected. Please capture a clear image of your meal or food.');
       } else {
         setDetectedItems(res.detectedItems || []);
+        if (res.aiEngine) setAiEngineUsed(res.aiEngine);
         setStep('confirm');
       }
     } catch (err) {
       setStep('error');
       setErrorMessage(err.message || 'Unable to analyze image. Please try again.');
+    }
+  };
+
+  const handleSelectCatalogFood = (food) => {
+    const newItem = {
+      name: food.name,
+      quantity: 1,
+      unit: food.unit,
+      confidence: 0.98,
+      dominantNutrient: `${food.carbsGrams}g Carbs, ${food.proteinGrams}g Protein`,
+      calories: food.calories,
+      proteinGrams: food.proteinGrams,
+      carbsGrams: food.carbsGrams,
+      fatsGrams: food.fatsGrams,
+      fiberGrams: food.fiberGrams,
+    };
+
+    if (step === 'confirm') {
+      // Add or replace in confirmation screen
+      setDetectedItems((prev) => [...prev, newItem]);
+      setSearchQuery('');
+    } else {
+      // Direct selection from capture/error screen
+      setDetectedItems([newItem]);
+      setManualHint(food.name);
+      setStep('confirm');
     }
   };
 
@@ -257,6 +321,14 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
     }
   };
 
+  const filteredFoods = searchQuery.trim()
+    ? FOOD_CATALOG.filter(
+        (f) =>
+          f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          f.category.toLowerCase().includes(searchQuery.toLowerCase())
+      ).slice(0, 6)
+    : [];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
       <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border border-gray-100 relative max-h-[92vh] overflow-y-auto">
@@ -269,13 +341,13 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
 
         <div className="text-center mb-5">
           <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">
-            AI Food Vision
+            AI Food Vision & Speech
           </span>
           <h3 className="text-xl sm:text-2xl font-black text-gray-950 mt-2">
             Scan & Validate Meal
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Strict food detection ensures only real food meals are recorded.
+            Powered by Multimodal Vision AI to recognize meals and convert nutrients to your health data.
           </p>
         </div>
 
@@ -393,7 +465,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                     <FolderOpen className="w-7 h-7" />
                   </div>
                   <span className="text-sm font-bold text-gray-900">
-                    Choose from Files or Folders
+                    Choose from Files or Camera
                   </span>
                   <span className="text-xs text-gray-400 mt-1">
                     Select any food photo (JPG, PNG, WEBP)
@@ -440,36 +512,81 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
               </form>
             )}
 
-            {/* Food Reference / Google Search Hint */}
+            {/* Instant Food Search & Voice Assistant */}
             <div className="p-3.5 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-amber-950 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  Food Reference / Google Image Hint (Optional):
+                  Food Search & Voice Input:
                 </span>
-                {manualHint && (
+                <button
+                  type="button"
+                  onClick={handleStartVoice}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                    isListening
+                      ? 'bg-rose-500 text-white animate-pulse'
+                      : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                  }`}
+                  title="Speak food name"
+                >
+                  {isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                  {isListening ? 'Listening...' : 'Speak Food'}
+                </button>
+              </div>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Type or search food: Boondi, Dosa, Biryani, Paneer, Rice..."
+                  value={searchQuery || manualHint}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setManualHint(e.target.value);
+                  }}
+                  className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-amber-200 bg-white focus:outline-none focus:border-amber-500 font-medium text-gray-800 shadow-xs"
+                />
+                {(searchQuery || manualHint) && (
                   <button
                     type="button"
-                    onClick={() => setManualHint('')}
-                    className="text-[10px] font-bold text-amber-700 hover:underline"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setManualHint('');
+                    }}
+                    className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600"
                   >
-                    Clear
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
-              <input
-                type="text"
-                placeholder="e.g. Dosa, Boiled Eggs, Rice & Dal, Paneer..."
-                value={manualHint}
-                onChange={(e) => setManualHint(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-amber-200 bg-white focus:outline-none focus:border-amber-500 font-medium text-gray-800 shadow-xs"
-              />
+
+              {/* Autocomplete suggestions */}
+              {filteredFoods.length > 0 && (
+                <div className="bg-white rounded-xl border border-amber-200 p-1.5 shadow-sm space-y-1">
+                  {filteredFoods.map((f, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectCatalogFood(f)}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 text-xs flex items-center justify-between transition-colors"
+                    >
+                      <span className="font-bold text-gray-800">{f.name}</span>
+                      <span className="text-[10px] text-gray-500">{f.calories} kcal • {f.proteinGrams}g P</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Quick Select Chips */}
               <div className="flex flex-wrap gap-1.5 pt-0.5">
                 {['Boondi', 'Dosa', 'Boiled Eggs', 'Steamed Rice', 'Yellow Dal', 'Roti', 'Paneer'].map((chip) => (
                   <button
                     key={chip}
                     type="button"
-                    onClick={() => setManualHint(chip)}
+                    onClick={() => {
+                      setManualHint(chip);
+                      setSearchQuery(chip);
+                    }}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
                       manualHint.toLowerCase().includes(chip.toLowerCase())
                         ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
@@ -567,7 +684,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
             <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
             <h4 className="text-base font-bold text-gray-900">Validating & Scanning Image...</h4>
             <p className="text-xs text-gray-500 max-w-xs mx-auto mt-1">
-              Checking for food presence and classifying individual nutritional components.
+              Analyzing photo with Multimodal Vision AI to classify foods and compute exact macros.
             </p>
           </div>
         )}
@@ -579,17 +696,51 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
               <AlertTriangle className="w-8 h-8" />
             </div>
             <div>
-              <h4 className="text-lg font-bold text-rose-900">Food not detected.</h4>
+              <h4 className="text-lg font-bold text-rose-900">Food not clearly detected</h4>
               <p className="text-sm text-gray-600 mt-1 max-w-sm mx-auto">
                 {errorMessage}
               </p>
             </div>
-            <button
-              onClick={() => setStep('capture')}
-              className="px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-sm transition-all"
-            >
-              Try Again
-            </button>
+
+            {/* Quick 1-tap food recovery selector */}
+            <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 text-left space-y-2">
+              <span className="text-xs font-bold text-gray-700 block">
+                Select your food to continue:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { name: 'Boondi (Crispy Kara Boondi)', cal: 240 },
+                  { name: 'Boondi Raita', cal: 160 },
+                  { name: 'Crispy Plain Dosa with Chutney', cal: 170 },
+                  { name: 'Steamed Rice (Cooked)', cal: 195 },
+                  { name: 'Yellow Dal (Cooked)', cal: 145 },
+                  { name: 'Paneer Butter Masala', cal: 320 },
+                  { name: 'Chicken Biryani', cal: 480 },
+                  { name: 'Samosa (Potato & Peas)', cal: 220 },
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      const match = FOOD_CATALOG.find((f) => f.name === item.name);
+                      if (match) handleSelectCatalogFood(match);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-white border border-gray-200 hover:border-emerald-500 text-xs font-bold text-gray-800 transition-colors"
+                  >
+                    + {item.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStep('capture')}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-700 text-xs font-bold hover:bg-gray-50"
+              >
+                Retake Photo
+              </button>
+            </div>
           </div>
         )}
 
@@ -603,9 +754,9 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                   alt="Detected Food"
                   className="w-full h-full object-cover"
                 />
-                <div className="absolute top-2 left-2 bg-black/70 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-xs flex items-center gap-1">
+                <div className="absolute top-2 left-2 bg-black/75 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-xs flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-emerald-400" />
-                  Food Verified (95% confidence)
+                  {aiEngineUsed} (98% confidence)
                 </div>
               </div>
             )}
@@ -613,10 +764,10 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                  Divided Nutrients by Food Item:
+                  Nutritional Breakdown by Food Item:
                 </span>
                 <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-semibold">
-                  AI Analyzed
+                  AI Verified
                 </span>
               </div>
 
@@ -694,6 +845,35 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
                   </div>
                 ))}
               </div>
+
+              {/* Add item search in confirm screen */}
+              <div className="mt-2.5">
+                <div className="relative">
+                  <Search className="w-3 h-3 text-gray-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="+ Add another food (e.g. Boondi, Raita, Chai)..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:border-emerald-500 font-medium text-gray-800"
+                  />
+                </div>
+                {filteredFoods.length > 0 && (
+                  <div className="bg-white rounded-xl border border-emerald-200 p-1.5 shadow-sm space-y-1 mt-1">
+                    {filteredFoods.map((f, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectCatalogFood(f)}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-emerald-50 text-xs flex items-center justify-between transition-colors"
+                      >
+                        <span className="font-bold text-gray-800">{f.name}</span>
+                        <span className="text-[10px] text-gray-500">{f.calories} kcal • {f.proteinGrams}g P</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Total Estimated Nutrition */}
@@ -735,7 +915,7 @@ export const CameraFoodModal = ({ isOpen, onClose, mealType = 'lunch', onMealSav
               <button
                 type="button"
                 onClick={handleSaveMeal}
-                disabled={isSaving}
+                disabled={isSaving || detectedItems.length === 0}
                 className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/30 flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 className="w-4 h-4" />

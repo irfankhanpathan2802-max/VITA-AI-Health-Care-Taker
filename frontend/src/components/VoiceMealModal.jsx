@@ -21,7 +21,7 @@ export const VoiceMealModal = ({ isOpen, onClose, mealType = 'breakfast', onMeal
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
+    recognition.lang = 'en-IN';
     recognition.interimResults = false;
 
     setIsListening(true);
@@ -224,6 +224,16 @@ export const VoiceMealModal = ({ isOpen, onClose, mealType = 'breakfast', onMeal
             <div className="pt-2 border-t border-gray-100">
               <span className="text-[11px] font-bold text-gray-400 block mb-1.5">Try sample sentence:</span>
               <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => {
+                    const text = 'I had a bowl of boondi and curd for snack';
+                    setTranscript(text);
+                    handleProcessVoice(text);
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-blue-50 text-gray-700 hover:text-blue-700 border border-gray-200 transition-colors"
+                >
+                  "Bowl of boondi and curd for snack"
+                </button>
                 <button
                   onClick={() => {
                     const text = 'I had two eggs, two rotis and dal for breakfast';

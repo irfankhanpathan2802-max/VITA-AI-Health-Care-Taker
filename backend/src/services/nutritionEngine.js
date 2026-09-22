@@ -70,6 +70,31 @@ export const FOOD_DATABASE = [
   { name: 'Filter Coffee with Milk', category: 'beverage', unit: 'cup (120ml)', calories: 85, proteinGrams: 2.8, carbsGrams: 12.0, fatsGrams: 3.0, fiberGrams: 0, isVeg: true, isVegan: false },
   { name: 'Almonds & Walnuts', category: 'snack', unit: 'handful (30g)', calories: 185, proteinGrams: 5.5, carbsGrams: 5.0, fatsGrams: 16.0, fiberGrams: 3.0, isVeg: true, isVegan: true },
   { name: 'Tofu (Firm)', category: 'protein', unit: 'serving (100g)', calories: 144, proteinGrams: 17.0, carbsGrams: 3.0, fatsGrams: 8.5, fiberGrams: 2.0, isVeg: true, isVegan: true },
+
+  // 9. Street Food, Chaats & Popular Regional Dishes
+  { name: 'Pani Puri (Gol Gappe)', category: 'snack', unit: '8 puris with pani', calories: 180, proteinGrams: 4.0, carbsGrams: 32.0, fatsGrams: 4.5, fiberGrams: 3.0, isVeg: true, isVegan: true },
+  { name: 'Pav Bhaji', category: 'snack', unit: '2 pavs + bhaji', calories: 380, proteinGrams: 8.5, carbsGrams: 54.0, fatsGrams: 14.5, fiberGrams: 5.5, isVeg: true, isVegan: false },
+  { name: 'Vada Pav', category: 'snack', unit: '1 piece', calories: 290, proteinGrams: 6.0, carbsGrams: 42.0, fatsGrams: 11.0, fiberGrams: 3.0, isVeg: true, isVegan: true },
+  { name: 'Chole Bhature', category: 'breakfast', unit: '2 bhature + chole', calories: 520, proteinGrams: 14.0, carbsGrams: 68.0, fatsGrams: 22.0, fiberGrams: 8.0, isVeg: true, isVegan: false },
+  { name: 'Kachori (Moong Dal)', category: 'snack', unit: 'piece (80g)', calories: 230, proteinGrams: 4.5, carbsGrams: 24.0, fatsGrams: 13.0, fiberGrams: 2.5, isVeg: true, isVegan: true },
+  { name: 'Uttapam (Onion & Tomato)', category: 'breakfast', unit: '1 uttapam', calories: 220, proteinGrams: 5.5, carbsGrams: 38.0, fatsGrams: 5.5, fiberGrams: 3.5, isVeg: true, isVegan: true },
+  { name: 'Ven Pongal with Ghee', category: 'breakfast', unit: 'bowl (200g)', calories: 270, proteinGrams: 7.5, carbsGrams: 44.0, fatsGrams: 8.5, fiberGrams: 3.5, isVeg: true, isVegan: false },
+  { name: 'Lemon Rice (Chitranna)', category: 'rice', unit: 'bowl (150g)', calories: 225, proteinGrams: 4.2, carbsGrams: 42.0, fatsGrams: 5.0, fiberGrams: 2.0, isVeg: true, isVegan: true },
+  { name: 'Kadai Paneer', category: 'curry', unit: 'bowl (150g)', calories: 290, proteinGrams: 14.0, carbsGrams: 10.0, fatsGrams: 22.0, fiberGrams: 3.0, isVeg: true, isVegan: false },
+  { name: 'Matar Paneer', category: 'curry', unit: 'bowl (150g)', calories: 250, proteinGrams: 13.0, carbsGrams: 14.0, fatsGrams: 16.0, fiberGrams: 4.5, isVeg: true, isVegan: false },
+  { name: 'Egg Curry (2 Boiled Eggs)', category: 'curry', unit: 'bowl (150g)', calories: 220, proteinGrams: 14.0, carbsGrams: 6.0, fatsGrams: 15.0, fiberGrams: 1.5, isVeg: false, isVegan: false },
+  { name: 'Egg Bhurji (Spiced Scrambled)', category: 'protein', unit: '2 eggs', calories: 195, proteinGrams: 13.5, carbsGrams: 3.5, fatsGrams: 14.0, fiberGrams: 1.2, isVeg: false, isVegan: false },
+  { name: 'Butter Chicken', category: 'curry', unit: 'bowl (150g)', calories: 340, proteinGrams: 26.0, carbsGrams: 8.0, fatsGrams: 23.0, fiberGrams: 1.5, isVeg: false, isVegan: false },
+  { name: 'Chicken Tikka', category: 'protein', unit: '6 pieces (150g)', calories: 240, proteinGrams: 32.0, carbsGrams: 4.0, fatsGrams: 10.0, fiberGrams: 1.5, isVeg: false, isVegan: false },
+  { name: 'Tandoori Chicken', category: 'protein', unit: '1 leg piece (150g)', calories: 260, proteinGrams: 34.0, carbsGrams: 3.0, fatsGrams: 12.0, fiberGrams: 1.0, isVeg: false, isVegan: false },
+
+  // 10. Western & Global Favorites
+  { name: 'Vegetable Pizza (Thin Crust)', category: 'snack', unit: '2 slices (160g)', calories: 340, proteinGrams: 12.0, carbsGrams: 46.0, fatsGrams: 12.0, fiberGrams: 4.0, isVeg: true, isVegan: false },
+  { name: 'Veg Burger', category: 'snack', unit: '1 burger', calories: 320, proteinGrams: 9.0, carbsGrams: 48.0, fatsGrams: 11.0, fiberGrams: 4.5, isVeg: true, isVegan: true },
+  { name: 'French Fries', category: 'snack', unit: 'medium (100g)', calories: 310, proteinGrams: 3.5, carbsGrams: 41.0, fatsGrams: 15.0, fiberGrams: 3.8, isVeg: true, isVegan: true },
+  { name: 'Veg Hakka Noodles', category: 'snack', unit: 'plate (200g)', calories: 310, proteinGrams: 7.5, carbsGrams: 52.0, fatsGrams: 8.5, fiberGrams: 4.0, isVeg: true, isVegan: true },
+  { name: 'Veg Fried Rice', category: 'rice', unit: 'plate (200g)', calories: 320, proteinGrams: 6.5, carbsGrams: 54.0, fatsGrams: 9.0, fiberGrams: 3.5, isVeg: true, isVegan: true },
+  { name: 'Vegetable Sandwich', category: 'snack', unit: '1 sandwich', calories: 210, proteinGrams: 6.0, carbsGrams: 34.0, fatsGrams: 5.5, fiberGrams: 4.0, isVeg: true, isVegan: true },
 ];
 
 /**
