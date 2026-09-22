@@ -130,7 +130,7 @@ export const EnquiryAssistantWidget = () => {
 
       {/* CONCIERGE DIALOG */}
       {isOpen && (
-        <div className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 w-[92vw] sm:w-[420px] bg-white rounded-3xl shadow-2xl border border-gray-200/80 overflow-hidden flex flex-col h-[540px] max-h-[85vh] animate-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-20 md:bottom-6 right-4 z-50 w-[calc(100vw-2rem)] sm:w-[420px] max-w-[420px] bg-white rounded-3xl shadow-2xl border border-gray-200/80 overflow-hidden flex flex-col h-[540px] max-h-[85vh] animate-in slide-in-from-bottom-5 duration-300">
           {/* Header */}
           <div className="bg-gradient-to-r from-gray-950 via-emerald-950 to-gray-900 text-white p-4 px-5 flex items-center justify-between border-b border-emerald-900/40 relative">
             <div className="flex items-center gap-3">
